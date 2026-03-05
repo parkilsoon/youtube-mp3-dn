@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import './App.css'
 
-const API_BASE = 'http://localhost:8000/api'
+const API_BASE = window.location.port === '5177'
+  ? 'http://localhost:8000/api'   // 개발 모드
+  : '/api'                        // 빌드 모드 (같은 서버)
 
 const AUDIO_FORMATS = [
   { value: 'original', label: '원본 (빠름)' },
@@ -85,7 +87,7 @@ function ResultItem({ item, onPlay, isPlaying }) {
 
       const evtSource = new EventSource(`${API_BASE}/download/progress/${task_id}`)
       evtSource.addEventListener('progress', (e) => {
-        const data = JSON.parse(e.data.replace(/True/g, 'true').replace(/False/g, 'false').replace(/None/g, 'null'))
+        const data = JSON.parse(e.data)
         setProgress(data.progress)
 
         if (data.status === 'downloading') setStatus('다운로드 중...')
@@ -189,7 +191,7 @@ function ResultItem({ item, onPlay, isPlaying }) {
   )
 }
 
-function Player({ current, streamUrl, isVideo, onToggleVideo }) {
+function Player({ current, streamUrl, isVideo, onToggleVideo, onClose }) {
   const audioRef = useRef(null)
   const videoRef = useRef(null)
   const [playing, setPlaying] = useState(false)
@@ -283,6 +285,9 @@ function Player({ current, streamUrl, isVideo, onToggleVideo }) {
         <button className="btn-toggle-video" onClick={onToggleVideo}>
           {isVideo ? '🎵 오디오' : '🎬 영상보기'}
         </button>
+        <button className="btn-close" onClick={onClose} title="닫기">
+          ✕
+        </button>
       </div>
     </div>
   )
@@ -296,9 +301,16 @@ function App() {
   const [isVideo, setIsVideo] = useState(false)
   const [error, setError] = useState('')
 
+  const handleClose = () => {
+    setCurrent(null)
+    setStreamUrl('')
+  }
+
   const handleSearch = async (query) => {
     setSearching(true)
     setError('')
+    setCurrent(null)
+    setStreamUrl('')
     try {
       const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}`)
       const data = await res.json()
@@ -318,14 +330,8 @@ function App() {
     }
     setCurrent(item)
     setStreamUrl('')
-    try {
-      const type = isVideo ? 'video' : 'audio'
-      const res = await fetch(`${API_BASE}/stream?video_id=${item.id}&type=${type}`)
-      const data = await res.json()
-      setStreamUrl(data.url)
-    } catch {
-      setError('스트림을 불러올 수 없습니다')
-    }
+    const type = isVideo ? 'video' : 'audio'
+    setStreamUrl(`${API_BASE}/stream/proxy?video_id=${item.id}&type=${type}`)
   }
 
   const handleToggleVideo = async () => {
@@ -333,22 +339,16 @@ function App() {
     setIsVideo(newIsVideo)
     if (current) {
       setStreamUrl('')
-      try {
-        const type = newIsVideo ? 'video' : 'audio'
-        const res = await fetch(`${API_BASE}/stream?video_id=${current.id}&type=${type}`)
-        const data = await res.json()
-        setStreamUrl(data.url)
-      } catch {
-        setError('스트림을 불러올 수 없습니다')
-      }
+      const type = newIsVideo ? 'video' : 'audio'
+      setStreamUrl(`${API_BASE}/stream/proxy?video_id=${current.id}&type=${type}`)
     }
   }
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>YouTube Free</h1>
-        <p>유튜브 음원 다운로더</p>
+        <h1>Suny's YouTube Free</h1>
+        <p>돈내기 싫어...</p>
       </header>
 
       <SearchBar onSearch={handleSearch} loading={searching} />
@@ -371,6 +371,7 @@ function App() {
         streamUrl={streamUrl}
         isVideo={isVideo}
         onToggleVideo={handleToggleVideo}
+        onClose={handleClose}
       />
     </div>
   )

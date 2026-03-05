@@ -1,17 +1,28 @@
 import asyncio
+import json
 import os
+import sys
 import tempfile
 import uuid
+import webbrowser
 from pathlib import Path
 
+import httpx
 import yt_dlp
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel
 
 app = FastAPI()
+
+# PyInstaller 번들 경로 지원
+if getattr(sys, 'frozen', False):
+    BASE_DIR = Path(sys._MEIPASS)
+else:
+    BASE_DIR = Path(__file__).parent
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,13 +38,24 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 # 다운로드 진행률 추적
 download_progress: dict[str, dict] = {}
 
+# yt-dlp 공통 옵션
+COOKIES_FILE = BASE_DIR / "cookies.txt"
+
+def get_base_opts() -> dict:
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+    }
+    if COOKIES_FILE.exists():
+        opts["cookiefile"] = str(COOKIES_FILE)
+    return opts
+
 
 @app.get("/api/search")
 async def search(q: str = Query(..., min_length=1), max_results: int = Query(10, ge=1, le=20)):
     """유튜브 검색"""
     ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
+        **get_base_opts(),
         "extract_flat": True,
         "default_search": "ytsearch",
     }
@@ -52,7 +74,7 @@ async def search(q: str = Query(..., min_length=1), max_results: int = Query(10,
                     "url": entry.get("url") or f"https://www.youtube.com/watch?v={entry.get('id')}",
                 }
                 for entry in entries
-                if entry.get("id")
+                if entry.get("id") and len(entry.get("id", "")) == 11
             ]
 
     results = await asyncio.to_thread(_search)
@@ -62,10 +84,7 @@ async def search(q: str = Query(..., min_length=1), max_results: int = Query(10,
 @app.get("/api/stream")
 async def get_stream_url(video_id: str, type: str = Query("audio", regex="^(audio|video)$")):
     """오디오/비디오 스트림 URL 추출"""
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-    }
+    ydl_opts = {**get_base_opts()}
 
     if type == "audio":
         ydl_opts["format"] = "bestaudio/best"
@@ -87,6 +106,62 @@ async def get_stream_url(video_id: str, type: str = Query("audio", regex="^(audi
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# 스트림 URL 캐시 (video_id+type → url)
+_stream_cache: dict[str, str] = {}
+
+
+@app.get("/api/stream/proxy")
+async def stream_proxy(video_id: str, type: str = Query("audio", regex="^(audio|video)$"), request: Request = None):
+    """유튜브 스트림을 프록시로 중계 (CORS 우회)"""
+    cache_key = f"{video_id}_{type}"
+
+    if cache_key not in _stream_cache:
+        ydl_opts = {**get_base_opts()}
+        if type == "audio":
+            ydl_opts["format"] = "bestaudio/best"
+        else:
+            ydl_opts["format"] = "best[height<=1080]"
+
+        def _extract():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+                return info.get("url")
+
+        url = await asyncio.to_thread(_extract)
+        if not url:
+            raise HTTPException(status_code=500, detail="스트림 URL을 가져올 수 없습니다")
+        _stream_cache[cache_key] = url
+
+    stream_url = _stream_cache[cache_key]
+
+    # Range 헤더 전달 (시크 지원)
+    headers = {}
+    range_header = request.headers.get("range") if request else None
+    if range_header:
+        headers["Range"] = range_header
+
+    async def _proxy():
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", stream_url, headers=headers, timeout=30.0) as resp:
+                if resp.status_code >= 400:
+                    _stream_cache.pop(cache_key, None)
+                    return
+                async for chunk in resp.aiter_bytes(chunk_size=65536):
+                    yield chunk
+
+    content_type = "audio/webm" if type == "audio" else "video/mp4"
+    response_headers = {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "no-cache",
+    }
+
+    return StreamingResponse(
+        _proxy(),
+        media_type=content_type,
+        headers=response_headers,
+    )
 
 
 class DownloadRequest(BaseModel):
@@ -123,8 +198,7 @@ async def _download_task(task_id: str, req: DownloadRequest):
     output_template = str(DOWNLOAD_DIR / f"{task_id}_%(title)s.%(ext)s")
 
     ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
+        **get_base_opts(),
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
     }
@@ -185,7 +259,7 @@ async def download_progress_sse(task_id: str):
         while True:
             if task_id in download_progress:
                 data = download_progress[task_id]
-                yield {"event": "progress", "data": str(data).replace("'", '"')}
+                yield {"event": "progress", "data": json.dumps(data, ensure_ascii=False)}
                 if data["status"] in ("done", "error"):
                     break
             await asyncio.sleep(0.5)
@@ -220,6 +294,24 @@ async def download_file(task_id: str):
     )
 
 
+# 빌드된 React 정적 파일 서빙
+STATIC_DIR = BASE_DIR / "static"
+if STATIC_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """React SPA fallback"""
+        # API 경로는 위에서 이미 처리됨
+        file_path = STATIC_DIR / full_path
+        if full_path and file_path.exists() and file_path.is_file():
+            return FileResponse(str(file_path))
+        return HTMLResponse((STATIC_DIR / "index.html").read_text())
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = 8000
+    print(f"\n✅ http://localhost:{port} 에서 사용 가능합니다\n")
+    webbrowser.open(f"http://localhost:{port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
