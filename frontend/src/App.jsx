@@ -191,13 +191,28 @@ function ResultItem({ item, onPlay, isPlaying }) {
   )
 }
 
-function Player({ current, streamUrl, isVideo, onToggleVideo, onClose }) {
+const VIDEO_QUALITIES = [
+  { value: '1080', label: '1080p' },
+  { value: '720', label: '720p' },
+  { value: '480', label: '480p' },
+  { value: '360', label: '360p' },
+]
+
+function Player({ current, streamUrl, isVideo, onToggleVideo, onClose, videoQuality, onQualityChange }) {
   const audioRef = useRef(null)
   const videoRef = useRef(null)
   const [playing, setPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const playerRef = useRef(null)
+
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onFsChange)
+    return () => document.removeEventListener('fullscreenchange', onFsChange)
+  }, [])
 
   useEffect(() => {
     if (!streamUrl) return
@@ -237,6 +252,15 @@ function Player({ current, streamUrl, isVideo, onToggleVideo, onClose }) {
     mediaRef.current.currentTime = ratio * duration
   }
 
+  const handleFullscreen = () => {
+    if (!isVideo || !playerRef.current) return
+    if (document.fullscreenElement) {
+      document.exitFullscreen()
+    } else {
+      playerRef.current.requestFullscreen()
+    }
+  }
+
   if (!current) {
     return (
       <div className="player empty">
@@ -246,7 +270,7 @@ function Player({ current, streamUrl, isVideo, onToggleVideo, onClose }) {
   }
 
   return (
-    <div className={`player ${isVideo ? 'video-mode' : ''}`}>
+    <div ref={playerRef} className={`player ${isVideo ? 'video-mode' : ''} ${isFullscreen ? 'fullscreen' : ''}`}>
       {isVideo && streamUrl && (
         <video
           ref={videoRef}
@@ -255,6 +279,7 @@ function Player({ current, streamUrl, isVideo, onToggleVideo, onClose }) {
           onTimeUpdate={handleTimeUpdate}
           onEnded={() => setPlaying(false)}
           className="video-player"
+          onDoubleClick={handleFullscreen}
         />
       )}
       {!isVideo && streamUrl && (
@@ -285,6 +310,22 @@ function Player({ current, streamUrl, isVideo, onToggleVideo, onClose }) {
         <button className="btn-toggle-video" onClick={onToggleVideo}>
           {isVideo ? '🎵 오디오' : '🎬 영상보기'}
         </button>
+        {isVideo && (
+          <select
+            className="quality-select"
+            value={videoQuality}
+            onChange={(e) => onQualityChange(e.target.value)}
+          >
+            {VIDEO_QUALITIES.map((q) => (
+              <option key={q.value} value={q.value}>{q.label}</option>
+            ))}
+          </select>
+        )}
+        {isVideo && (
+          <button className="btn-fullscreen" onClick={handleFullscreen} title="전체화면">
+            {isFullscreen ? '축소' : '전체'}
+          </button>
+        )}
         <button className="btn-close" onClick={onClose} title="닫기">
           ✕
         </button>
@@ -299,6 +340,7 @@ function App() {
   const [current, setCurrent] = useState(null)
   const [streamUrl, setStreamUrl] = useState('')
   const [isVideo, setIsVideo] = useState(false)
+  const [videoQuality, setVideoQuality] = useState('1080')
   const [error, setError] = useState('')
 
   const handleClose = () => {
@@ -331,7 +373,8 @@ function App() {
     setCurrent(item)
     setStreamUrl('')
     const type = isVideo ? 'video' : 'audio'
-    setStreamUrl(`${API_BASE}/stream/proxy?video_id=${item.id}&type=${type}`)
+    const q = isVideo ? `&quality=${videoQuality}` : ''
+    setStreamUrl(`${API_BASE}/stream/proxy?video_id=${item.id}&type=${type}${q}`)
   }
 
   const handleToggleVideo = async () => {
@@ -340,7 +383,16 @@ function App() {
     if (current) {
       setStreamUrl('')
       const type = newIsVideo ? 'video' : 'audio'
-      setStreamUrl(`${API_BASE}/stream/proxy?video_id=${current.id}&type=${type}`)
+      const q = newIsVideo ? `&quality=${videoQuality}` : ''
+      setStreamUrl(`${API_BASE}/stream/proxy?video_id=${current.id}&type=${type}${q}`)
+    }
+  }
+
+  const handleQualityChange = (q) => {
+    setVideoQuality(q)
+    if (current && isVideo) {
+      setStreamUrl('')
+      setStreamUrl(`${API_BASE}/stream/proxy?video_id=${current.id}&type=video&quality=${q}`)
     }
   }
 
@@ -372,6 +424,8 @@ function App() {
         isVideo={isVideo}
         onToggleVideo={handleToggleVideo}
         onClose={handleClose}
+        videoQuality={videoQuality}
+        onQualityChange={handleQualityChange}
       />
     </div>
   )

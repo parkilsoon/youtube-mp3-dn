@@ -119,16 +119,16 @@ _stream_cache: dict[str, str] = {}
 
 
 @app.get("/api/stream/proxy")
-async def stream_proxy(video_id: str, type: str = Query("audio", regex="^(audio|video)$"), request: Request = None):
+async def stream_proxy(video_id: str, type: str = Query("audio", regex="^(audio|video)$"), quality: str = Query("1080"), request: Request = None):
     """유튜브 스트림을 프록시로 중계 (CORS 우회)"""
-    cache_key = f"{video_id}_{type}"
+    cache_key = f"{video_id}_{type}_{quality}"
 
     if cache_key not in _stream_cache:
         ydl_opts = {**get_base_opts()}
         if type == "audio":
             ydl_opts["format"] = "bestaudio/best"
         else:
-            ydl_opts["format"] = "best[height<=1080]"
+            ydl_opts["format"] = f"best[height<={quality}]"
 
         def _extract():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

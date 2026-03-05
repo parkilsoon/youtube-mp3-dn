@@ -348,6 +348,54 @@ body {
   background: #333;
 }
 
+.quality-select {
+  padding: 4px 8px;
+  border: 1px solid #333;
+  border-radius: 6px;
+  background: #252525;
+  color: #e1e1e1;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.btn-fullscreen {
+  padding: 6px 12px;
+  border: 1px solid #333;
+  border-radius: 6px;
+  background: #252525;
+  color: #e1e1e1;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.btn-fullscreen:hover {
+  background: #333;
+}
+
+/* Fullscreen mode */
+.player.fullscreen {
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  border: none;
+  padding: 0;
+}
+
+.player.fullscreen .video-player {
+  flex: 1;
+  max-height: none;
+  object-fit: contain;
+}
+
+.player.fullscreen .player-controls {
+  background: rgba(0, 0, 0, 0.8);
+  padding: 12px 20px;
+  max-width: 100%;
+}
+
 .btn-close {
   width: 32px;
   height: 32px;
