@@ -14,9 +14,13 @@ jobs:
           - os: windows-latest
             name: Windows
             artifact: YouTube-Free-Windows
+            ffmpeg_url: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip
+            ffmpeg_bin: ffmpeg-master-latest-win64-gpl/bin
           - os: macos-latest
             name: macOS
             artifact: YouTube-Free-macOS
+            ffmpeg_url: https://evermeet.cx/ffmpeg/getrelease/zip
+            ffmpeg_bin: .
 
     runs-on: ${{ matrix.os }}
     name: Build (${{ matrix.name }})
@@ -34,13 +38,30 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install ffmpeg (Windows)
+      # ffmpeg 정적 바이너리 다운로드 → backend/ffmpeg_bin/에 저장
+      - name: Download ffmpeg (Windows)
         if: matrix.os == 'windows-latest'
-        run: choco install ffmpeg -y
+        shell: bash
+        run: |
+          curl -L -o ffmpeg.zip "${{ matrix.ffmpeg_url }}"
+          unzip ffmpeg.zip
+          mkdir -p backend/ffmpeg_bin
+          cp ${{ matrix.ffmpeg_bin }}/ffmpeg.exe backend/ffmpeg_bin/
+          cp ${{ matrix.ffmpeg_bin }}/ffprobe.exe backend/ffmpeg_bin/
 
-      - name: Install ffmpeg (macOS)
+      - name: Download ffmpeg (macOS)
         if: matrix.os == 'macos-latest'
-        run: brew install ffmpeg
+        run: |
+          curl -L -o ffmpeg.zip "${{ matrix.ffmpeg_url }}"
+          unzip ffmpeg.zip
+          mkdir -p backend/ffmpeg_bin
+          cp ffmpeg backend/ffmpeg_bin/
+          chmod +x backend/ffmpeg_bin/ffmpeg
+          # ffprobe 별도 다운로드
+          curl -L -o ffprobe.zip "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip"
+          unzip -o ffprobe.zip
+          cp ffprobe backend/ffmpeg_bin/
+          chmod +x backend/ffmpeg_bin/ffprobe
 
       # 프론트엔드 빌드
       - name: Build Frontend

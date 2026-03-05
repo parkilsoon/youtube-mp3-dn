@@ -21,6 +21,8 @@ app = FastAPI()
 # PyInstaller 번들 경로 지원
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys._MEIPASS)
+    # 번들된 ffmpeg를 PATH에 추가
+    os.environ["PATH"] = str(BASE_DIR) + os.pathsep + os.environ.get("PATH", "")
 else:
     BASE_DIR = Path(__file__).parent
 
@@ -48,6 +50,10 @@ def get_base_opts() -> dict:
     }
     if COOKIES_FILE.exists():
         opts["cookiefile"] = str(COOKIES_FILE)
+    # 번들된 ffmpeg 경로 지정
+    ffmpeg_path = BASE_DIR / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+    if ffmpeg_path.exists():
+        opts["ffmpeg_location"] = str(BASE_DIR)
     return opts
 
 

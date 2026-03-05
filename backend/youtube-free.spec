@@ -1,14 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
+import sys
+import glob
 import yt_dlp
 
 yt_dlp_dir = os.path.dirname(yt_dlp.__file__)
 
+# ffmpeg 바이너리 포함
+ffmpeg_binaries = []
+ffmpeg_dir = os.path.join(os.path.dirname(os.path.abspath(SPEC)), 'ffmpeg_bin')
+if os.path.exists(ffmpeg_dir):
+    for f in glob.glob(os.path.join(ffmpeg_dir, '*')):
+        ffmpeg_binaries.append((f, '.'))
+
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=ffmpeg_binaries,
     datas=[
         ('static', 'static'),
         (yt_dlp_dir, 'yt_dlp'),
